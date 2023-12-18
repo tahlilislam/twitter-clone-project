@@ -2,7 +2,9 @@
 
 {% block content %}
 
-<div id="warbler-hero" class="full-width"></div>
+<div id="warbler-hero" class="full-width">
+  <img src="{{user.header_image_url}}" alt="">
+</div>
 <img src="{{ user.image_url }}" alt="Image for {{ user.username }}" id="profile-avatar">
 <div class="row full-width">
   <div class="container">
@@ -29,7 +31,7 @@
           </li>
           <li class="stat">
             <p class="small">Likes</p>
-            <h4>TBD</h4>
+            <h4><a href="/users/{{ user.id }}/likes">{{ likes|length }}</a></h4>
           </li>
           <div class="ml-auto">
             {% if g.user.id == user.id %}
@@ -58,8 +60,18 @@
 <div class="row">
   <div class="col-sm-3">
     <h4 id="sidebar-username">@{{ user.username }}</h4>
-    <p>BIO HERE</p>
-    <p class="user-location"><span class="fa fa-map-marker"></span>LOCATION HERE</p>
+    <p> 
+      {%if user.bio%}
+      {{user.bio}}
+      {%else%}
+      <p>User Bio is empty.</p>
+      {%endif%}
+    </p>
+    {%if user.location%}
+    <p class="user-location"><span class="fa fa-map-marker"></span>{{user.location}}</p>
+    {%else%}
+    <p>No Location set yet.</p>
+    {%endif%}
   </div>
 
   {% block user_details %}

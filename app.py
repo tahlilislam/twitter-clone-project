@@ -4,8 +4,8 @@ from flask import Flask, render_template, request, flash, redirect, session, g
 from flask_debugtoolbar import DebugToolbarExtension
 from sqlalchemy.exc import IntegrityError
 
-from forms import UserAddForm, LoginForm, MessageForm
-from models import db, connect_db, User, Message
+from forms import UserAddForm, LoginForm, MessageForm, ProfileEditForm
+from models import db, connect_db, User, Message, Likes
 
 CURR_USER_KEY = "curr_user"
 
@@ -112,6 +112,10 @@ def login():
 @app.route('/logout')
 def logout():
     """Handle logout of user."""
+    if CURR_USER_KEY in session:
+        do_logout()
+    return redirect('/')
+    
 
     # IMPLEMENT THIS
 
@@ -135,6 +139,38 @@ def list_users():
 
     return render_template('users/index.html', users=users)
 
+@app.route('/users/add_like/<int:message_id>', methods = ['POST'])
+def add_like_to_post(message_id):
+    """User interacts with other users posts by liking it"""
+    if not g.user:
+        flash("Access unauthorized.", "danger")
+        return redirect('/')
+    # get the message
+    liked_message = Message.query.get_or_404(message_id)
+    # To ensure users can't like their own message
+    # if liked_message.user_id != g.user.id:
+    # create a like object
+    likes = Likes(user_id = g.user.id, message_id =message_id)
+    try:
+        db.session.add(likes)
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+
+    return redirect("/")
+
+@app.route('/users/unlike/<int:message_id>', methods=['POST'])
+def unlike_post(message_id):
+    if not g.user:
+        flash("Access unauthorized.", "danger")
+        return redirect('/')
+
+    likes = Likes.query.filter_by(user_id=g.user.id, message_id=message_id).first()
+    if likes:
+        db.session.delete(likes)
+        db.session.commit()
+    return redirect('/')
+
 
 @app.route('/users/<int:user_id>')
 def users_show(user_id):
@@ -150,7 +186,9 @@ def users_show(user_id):
                 .order_by(Message.timestamp.desc())
                 .limit(100)
                 .all())
-    return render_template('users/show.html', user=user, messages=messages)
+    likes = Likes.query.filter_by(user_id=user_id).all()
+
+    return render_template('users/show.html', user=user, messages=messages, likes=likes)
 
 
 @app.route('/users/<int:user_id>/following')
@@ -162,7 +200,9 @@ def show_following(user_id):
         return redirect("/")
 
     user = User.query.get_or_404(user_id)
-    return render_template('users/following.html', user=user)
+    likes = Likes.query.filter_by(user_id = user_id).all()
+
+    return render_template('users/following.html', user=user, likes=likes)
 
 
 @app.route('/users/<int:user_id>/followers')
@@ -174,7 +214,24 @@ def users_followers(user_id):
         return redirect("/")
 
     user = User.query.get_or_404(user_id)
-    return render_template('users/followers.html', user=user)
+    # need to pass in likes to every route extending from user/details.html to be properly passed to child template
+    likes = Likes.query.filter_by(user_id = user_id).all()
+    return render_template('users/followers.html', user=user, likes=likes)
+
+@app.route('/users/<int:user_id>/likes')
+def users_likes(user_id):
+    """Show list of follower's post that the user liked."""
+
+    if not g.user:
+        flash("Access unauthorized.", "danger")
+        return redirect("/")
+
+    user = User.query.get_or_404(user_id)
+    # accessing message objest associated with each like object
+    liked_messages = user.likes
+    likes = Likes.query.filter_by(user_id = user_id).all()
+
+    return render_template('users/likes.html', user=user, messages = liked_messages, likes=likes)
 
 
 @app.route('/users/follow/<int:follow_id>', methods=['POST'])
@@ -211,6 +268,27 @@ def stop_following(follow_id):
 def profile():
     """Update profile for current user."""
 
+    if not g.user:
+        flash("Access unauthorized.", "danger")
+        return redirect("/")
+    user = g.user
+    form = ProfileEditForm(obj=user)
+
+    if form.validate_on_submit():
+        if User.authenticate(user.username, form.password.data):
+            user.username = form.username.data
+            user.email =form.email.data
+            user.image_url = form.image_url.data or User.image_url.default.arg
+            user.header_iamge_url = form.header_image_url.data or User.header_image_url.default.arg
+            user.bio = form.bio.data
+
+            db.session.commit()
+            return redirect(f'/users/{user.id}')
+        else:
+            flash("Invalid password.", "danger")
+        
+
+    return render_template('/users/edit.html', form=form, user=user)
     # IMPLEMENT THIS
 
 
@@ -292,13 +370,24 @@ def homepage():
     """
 
     if g.user:
+        # concatonate with current user's id bc user's feed typically includes 
+        # posts from other users they follow and their own posts
+        followed_ids = [u.id for u in g.user.following] + [g.user.id]
         messages = (Message
                     .query
+                    .filter(Message.user_id.in_(followed_ids))
                     .order_by(Message.timestamp.desc())
                     .limit(100)
                     .all())
+        
+        likes = Likes.query.filter_by(user_id=g.user.id).all()
+        likes_id_array= []
+        for like in likes:
+            likes_id_array.append(like.message_id)
 
-        return render_template('home.html', messages=messages)
+
+
+        return render_template('home.html', messages=messages, likes=likes_id_array)
 
     else:
         return render_template('home-anon.html')
